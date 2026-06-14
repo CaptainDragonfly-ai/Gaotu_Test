@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block page_title %}总校下发{% endblock %}
+{% block page_subtitle %}上传试卷 PDF 和答案 PDF，选择目标分校后成套下发。{% endblock %}
+
+{% block content %}
+<section class="grid two">
+  <form class="panel" method="post" enctype="multipart/form-data">
+    <h2>下发试卷套件</h2>
+    <label>试卷名称
+      <input name="title" placeholder="例如：高途政治阶段测试" required>
+    </label>
+    <label>科目
+      <input name="subject" placeholder="例如：政治" required>
+    </label>
+    <label>试卷 PDF
+      <input type="file" name="paper_pdf" accept="application/pdf" required>
+    </label>
+    <label>答案 PDF
+      <input type="file" name="standard_pdf" accept="application/pdf" required>
+    </label>
+    <div class="check-list">
+      <strong>接收分校</strong>
+      {% for campus in db.campuses %}
+        <label class="check-row">
+          <input type="checkbox" name="campus_ids" value="{{ campus.id }}">
+          <span>{{ campus.name }}（{{ campus.code }}）</span>
+        </label>
+      {% else %}
+        <p class="empty">请先注册分校。</p>
+      {% endfor %}
+    </div>
+    <button type="submit">成套下发</button>
+  </form>
+
+  <div class="panel">
+    <h2>分校注册</h2>
+    <form method="post" action="{{ url_for('create_campus') }}">
+      <label>分校名称
+        <input name="name" placeholder="例如：北京海淀校区" required>
+      </label>
+      <label>分校编码
+        <input name="code" placeholder="例如：BJ-HD" required>
+      </label>
+      <button type="submit">新增分校</button>
+    </form>
+
+    <div class="campus-list">
+      {% for campus in db.campuses %}
+        <div class="campus-item">
+          <span>{{ campus.name }}（{{ campus.code }}）</span>
+          <form method="post" action="{{ url_for('delete_campus', campus_id=campus.id) }}">
+            <button class="danger" type="submit">删除</button>
+          </form>
+        </div>
+      {% else %}
+        <p class="empty">暂无分校。</p>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>已下发试卷</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>试卷</th>
+        <th>科目</th>
+        <th>分校</th>
+        <th>下发时间</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for exam in db.exams %}
+      <tr>
+        <td>{{ exam.title }}</td>
+        <td>{{ exam.subject }}</td>
+        <td>
+          {% for campus_id in exam.recipients %}
+            <span class="tag">{{ campuses[campus_id].name if campus_id in campuses else campus_id }}</span>
+          {% else %}
+            <span class="empty">暂无接收分校</span>
+          {% endfor %}
+        </td>
+        <td>{{ exam.created_at }}</td>
+        <td class="actions">
+          <a href="{{ url_for('preview_file', path=exam.paper_path) }}" target="_blank">预览试卷</a>
+          <a href="{{ url_for('download_file', path=exam.paper_path) }}">下载试卷</a>
+          {% if exam.standard_pdf_path %}
+            <a href="{{ url_for('preview_file', path=exam.standard_pdf_path) }}" target="_blank">预览答案</a>
+            <a href="{{ url_for('download_file', path=exam.standard_pdf_path) }}">下载答案</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="empty">暂无试卷。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

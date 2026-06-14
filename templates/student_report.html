@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block page_title %}成绩详情{% endblock %}
+{% block page_subtitle %}{{ report.name }} / {{ report.phone }} / {{ report.subject or "未知科目" }}{% endblock %}
+
+{% block content %}
+<section class="grid four">
+  <div class="metric"><span>总题数</span><strong>{{ report.summary["总题数"] }}</strong></div>
+  <div class="metric"><span>正确</span><strong>{{ report.summary["正确题数"] }}</strong></div>
+  <div class="metric"><span>错误</span><strong>{{ report.summary["错误题数"] }}</strong></div>
+  <div class="metric"><span>正确率</span><strong>{{ (report.summary["正确率"] * 100) | round(1) }}%</strong></div>
+</section>
+
+<section class="panel">
+  <h2>错题明细</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>题号</th>
+        <th>学生答案</th>
+        <th>正确答案</th>
+        <th>解析</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in report.wrong_questions %}
+      <tr>
+        <td>{{ item["题号"] }}</td>
+        <td>{{ item["学生答案"] or "空" }}</td>
+        <td>{{ item["正确答案"] }}</td>
+        <td>{{ item["错误解析"] }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="empty">没有错题。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

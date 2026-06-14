@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block page_title %}学生查询{% endblock %}
+{% block page_subtitle %}通过分校、姓名和手机号查看试卷下载入口与批改结果。{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <form class="inline-form" method="post">
+    <label>分校
+      <select name="campus_id" required>
+        <option value="">请选择</option>
+        {% for campus in db.campuses %}
+          <option value="{{ campus.id }}" {% if filters.campus_id == campus.id %}selected{% endif %}>
+            {{ campus.name }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>姓名
+      <input name="name" value="{{ filters.name }}" required>
+    </label>
+    <label>手机号
+      <input name="phone" value="{{ filters.phone }}" required>
+    </label>
+    <button type="submit">查询</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>查询结果</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>试卷</th>
+        <th>分校</th>
+        <th>正确率</th>
+        <th>错题数</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in results %}
+      <tr>
+        <td>{{ item.exam.title }}</td>
+        <td>{{ item.campus.name }}</td>
+        <td>{{ (item.report.summary["正确率"] * 100) | round(1) }}%</td>
+        <td>{{ item.report.summary["错误题数"] }}</td>
+        <td class="actions">
+          <a href="{{ url_for('preview_file', path=item.exam.paper_path) }}" target="_blank">查看试卷</a>
+          <a href="{{ url_for('download_file', path=item.exam.paper_path) }}">下载试卷</a>
+          <a href="{{ url_for('student_report', path=item.report_path) }}">成绩详情</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="empty">暂无匹配成绩。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

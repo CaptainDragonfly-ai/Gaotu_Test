@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block page_title %}{{ campus.name }} / {{ exam.title }}{% endblock %}
+{% block page_subtitle %}选择标准答案和学生答案后，点击开始批改生成成绩报告。{% endblock %}
+
+{% block content %}
+<section class="grid two">
+  <div class="panel">
+    <h2>试卷预览</h2>
+    <iframe class="pdf-frame" src="{{ url_for('preview_file', path=exam.paper_path) }}"></iframe>
+    <div class="actions bottom">
+      <a href="{{ url_for('download_file', path=exam.paper_path) }}">下载试卷</a>
+      {% if delivery.standard_pdf_path %}
+        <a href="{{ url_for('preview_file', path=delivery.standard_pdf_path) }}" target="_blank">预览答案</a>
+        <a href="{{ url_for('download_file', path=delivery.standard_pdf_path) }}">下载答案</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>处理进度</h2>
+    <dl class="meta">
+      <dt>当前状态</dt><dd><span class="status">{{ delivery.status }}</span></dd>
+      <dt>标准答案</dt><dd>{{ standard_sets|length }} 份</dd>
+      <dt>学生答案</dt><dd>{{ student_sets|length }} 份</dd>
+      <dt>报告数量</dt><dd>{{ delivery.report_count }}</dd>
+      <dt>更新时间</dt><dd>{{ delivery.updated_at }}</dd>
+    </dl>
+  </div>
+</section>
+
+<section class="grid two">
+  <form class="panel" method="post" enctype="multipart/form-data">
+    <h2>上传学生答题卡</h2>
+    <input type="hidden" name="action" value="upload_students">
+    <label>学生答题卡 PDF
+      <input type="file" name="student_pdf" accept="application/pdf" required>
+    </label>
+    <button type="submit">识别为学生答案</button>
+  </form>
+
+  <form class="panel" method="post">
+    <h2>选择答案并批改</h2>
+    <input type="hidden" name="action" value="grade">
+    <label>标准答案
+      <select name="standard_set_id" required>
+        <option value="">请选择标准答案</option>
+        {% for item in standard_sets %}
+          <option value="{{ item.id }}" {% if delivery.selected_standard_set_id == item.id %}selected{% endif %}>
+            {{ item.name }} / {{ item.created_at }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>学生答案
+      <select name="student_set_id" required>
+        <option value="">请选择学生答案</option>
+        {% for item in student_sets %}
+          <option value="{{ item.id }}" {% if delivery.selected_student_set_id == item.id %}selected{% endif %}>
+            {{ item.name }} / {{ item.created_at }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <p class="hint">标准答案由总校下发；学生答案来自已上传并识别的答题卡 PDF。</p>
+    <button type="submit">开始批改</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>可选答案记录</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>类型</th>
+        <th>名称</th>
+        <th>生成时间</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in standard_sets %}
+      <tr>
+        <td>标准答案</td>
+        <td>{{ item.name }}</td>
+        <td>{{ item.created_at }}</td>
+        <td class="actions">
+          {% if item.pdf_path %}
+            <a href="{{ url_for('preview_file', path=item.pdf_path) }}" target="_blank">预览 PDF</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      {% for item in student_sets %}
+      <tr>
+        <td>学生答案</td>
+        <td>{{ item.name }}</td>
+        <td>{{ item.created_at }}</td>
+        <td class="actions">
+          {% if item.pdf_path %}
+            <a href="{{ url_for('preview_file', path=item.pdf_path) }}" target="_blank">预览 PDF</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+        {% if not standard_sets %}
+          <tr><td colspan="4" class="empty">暂无可选答案。</td></tr>
+        {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block page_title %}分校处理{% endblock %}
+{% block page_subtitle %}分校接收试卷，上传答题卡和总部答案，并触发自动批改。{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <form class="inline-form" method="get">
+    <label>当前分校
+      <select name="campus_id" onchange="this.form.submit()">
+        {% for campus in db.campuses %}
+          <option value="{{ campus.id }}" {% if selected and selected.id == campus.id %}selected{% endif %}>
+            {{ campus.name }}（{{ campus.code }}）
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">切换</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>收到的试卷</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>试卷</th>
+        <th>科目</th>
+        <th>状态</th>
+        <th>更新时间</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in exams %}
+      <tr>
+        <td>{{ item.exam.title }}</td>
+        <td>{{ item.exam.subject }}</td>
+        <td><span class="status">{{ item.delivery.status }}</span></td>
+        <td>{{ item.delivery.updated_at }}</td>
+        <td class="actions">
+          <a href="{{ url_for('branch_exam', campus_id=selected.id, exam_id=item.exam.id) }}">处理</a>
+          <a href="{{ url_for('preview_file', path=item.exam.paper_path) }}" target="_blank">预览</a>
+          <a href="{{ url_for('download_file', path=item.exam.paper_path) }}">下载</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="empty">暂无分校或暂无下发试卷。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
