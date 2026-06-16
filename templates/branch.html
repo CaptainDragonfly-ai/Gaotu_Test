@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block page_title %}分校处理{% endblock %}
-{% block page_subtitle %}分校接收试卷，上传答题卡和总部答案，并触发自动批改。{% endblock %}
+{% block page_subtitle %}分校接收试卷，上传答题卡，并选择答案进行批改。{% endblock %}
 
 {% block content %}
 <section class="panel">
@@ -39,7 +39,6 @@
         <td>{{ item.delivery.updated_at }}</td>
         <td class="actions">
           <a href="{{ url_for('branch_exam', campus_id=selected.id, exam_id=item.exam.id) }}">处理</a>
-          <a href="{{ url_for('preview_file', path=item.exam.paper_path) }}" target="_blank">预览</a>
           <a href="{{ url_for('download_file', path=item.exam.paper_path) }}">下载</a>
         </td>
       </tr>

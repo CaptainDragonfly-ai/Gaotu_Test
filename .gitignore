@@ -3,13 +3,15 @@
 venv/
 .idea/
 __pycache__/
+**/__pycache__/
 *.py[cod]
+.pytest_cache/
+*.log
 
 standard_answers.json
 standard_answers.csv
 students_answers.json
 student_reports/
+results/
 data/app_data.json
 storage/
-server.log
-server.err.log

@@ -18,16 +18,28 @@
     <label>答案 PDF
       <input type="file" name="standard_pdf" accept="application/pdf" required>
     </label>
-    <div class="check-list">
-      <strong>接收分校</strong>
-      {% for campus in db.campuses %}
-        <label class="check-row">
-          <input type="checkbox" name="campus_ids" value="{{ campus.id }}">
-          <span>{{ campus.name }}（{{ campus.code }}）</span>
-        </label>
-      {% else %}
-        <p class="empty">请先注册分校。</p>
-      {% endfor %}
+
+    <div class="check-list campus-picker">
+      <div class="picker-head">
+        <strong>接收分校</strong>
+        <span id="campusSelectedCount">已选 0 个</span>
+      </div>
+      <input id="campusSearch" type="search" placeholder="查找分校名称或编码">
+      <label class="check-row select-all-row">
+        <input id="campusSelectAll" type="checkbox">
+        <span>全选当前结果</span>
+      </label>
+      <div id="campusOptions" class="campus-options">
+        {% for campus in db.campuses %}
+          <label class="check-row campus-option" data-campus-key="{{ campus.name }} {{ campus.code }}">
+            <input class="campus-checkbox" type="checkbox" name="campus_ids" value="{{ campus.id }}">
+            <span>{{ campus.name }}（{{ campus.code }}）</span>
+          </label>
+        {% else %}
+          <p class="empty">请先注册分校。</p>
+        {% endfor %}
+      </div>
+      <p id="campusNoResult" class="empty hidden">没有匹配的分校。</p>
     </div>
     <button type="submit">成套下发</button>
   </form>
@@ -99,4 +111,49 @@
     </tbody>
   </table>
 </section>
+
+<script>
+  const campusSearch = document.getElementById("campusSearch");
+  const selectAll = document.getElementById("campusSelectAll");
+  const options = Array.from(document.querySelectorAll(".campus-option"));
+  const checkboxes = Array.from(document.querySelectorAll(".campus-checkbox"));
+  const selectedCount = document.getElementById("campusSelectedCount");
+  const noResult = document.getElementById("campusNoResult");
+
+  function visibleOptions() {
+    return options.filter((option) => !option.classList.contains("hidden"));
+  }
+
+  function updateCampusState() {
+    const keyword = campusSearch.value.trim().toLowerCase();
+    let visibleCount = 0;
+
+    options.forEach((option) => {
+      const matched = option.dataset.campusKey.toLowerCase().includes(keyword);
+      option.classList.toggle("hidden", !matched);
+      if (matched) {
+        visibleCount += 1;
+      }
+    });
+
+    const checkedCount = checkboxes.filter((item) => item.checked).length;
+    const visibleChecks = visibleOptions().map((option) => option.querySelector(".campus-checkbox"));
+    const visibleCheckedCount = visibleChecks.filter((item) => item.checked).length;
+
+    selectedCount.textContent = `已选 ${checkedCount} 个`;
+    selectAll.checked = visibleChecks.length > 0 && visibleCheckedCount === visibleChecks.length;
+    selectAll.indeterminate = visibleCheckedCount > 0 && visibleCheckedCount < visibleChecks.length;
+    noResult.classList.toggle("hidden", visibleCount > 0 || options.length === 0);
+  }
+
+  campusSearch.addEventListener("input", updateCampusState);
+  selectAll.addEventListener("change", () => {
+    visibleOptions().forEach((option) => {
+      option.querySelector(".campus-checkbox").checked = selectAll.checked;
+    });
+    updateCampusState();
+  });
+  checkboxes.forEach((item) => item.addEventListener("change", updateCampusState));
+  updateCampusState();
+</script>
 {% endblock %}

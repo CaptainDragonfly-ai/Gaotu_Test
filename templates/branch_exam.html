@@ -5,15 +5,17 @@
 {% block content %}
 <section class="grid two">
   <div class="panel">
-    <h2>试卷预览</h2>
-    <iframe class="pdf-frame" src="{{ url_for('preview_file', path=exam.paper_path) }}"></iframe>
-    <div class="actions bottom">
-      <a href="{{ url_for('download_file', path=exam.paper_path) }}">下载试卷</a>
-      {% if delivery.standard_pdf_path %}
-        <a href="{{ url_for('preview_file', path=delivery.standard_pdf_path) }}" target="_blank">预览答案</a>
-        <a href="{{ url_for('download_file', path=delivery.standard_pdf_path) }}">下载答案</a>
-      {% endif %}
+    <div class="panel-head">
+      <h2>文件预览</h2>
+      <div class="preview-toolbar">
+        <button class="tab-button active" type="button" data-preview-url="{{ url_for('preview_file', path=exam.paper_path) }}" data-download-url="{{ url_for('download_file', path=exam.paper_path) }}">试卷</button>
+        {% if delivery.standard_pdf_path %}
+          <button class="tab-button" type="button" data-preview-url="{{ url_for('preview_file', path=delivery.standard_pdf_path) }}" data-download-url="{{ url_for('download_file', path=delivery.standard_pdf_path) }}">答案</button>
+        {% endif %}
+        <a class="download-button" id="currentDownload" href="{{ url_for('download_file', path=exam.paper_path) }}">下载</a>
+      </div>
     </div>
+    <iframe class="pdf-frame" id="pdfPreview" src="{{ url_for('preview_file', path=exam.paper_path) }}"></iframe>
   </div>
 
   <div class="panel">
@@ -74,7 +76,7 @@
         <th>类型</th>
         <th>名称</th>
         <th>生成时间</th>
-        <th>操作</th>
+        <th>文件</th>
       </tr>
     </thead>
     <tbody>
@@ -83,11 +85,7 @@
         <td>标准答案</td>
         <td>{{ item.name }}</td>
         <td>{{ item.created_at }}</td>
-        <td class="actions">
-          {% if item.pdf_path %}
-            <a href="{{ url_for('preview_file', path=item.pdf_path) }}" target="_blank">预览 PDF</a>
-          {% endif %}
-        </td>
+        <td>{{ "PDF 已保存" if item.pdf_path else "无 PDF" }}</td>
       </tr>
       {% endfor %}
       {% for item in student_sets %}
@@ -95,11 +93,7 @@
         <td>学生答案</td>
         <td>{{ item.name }}</td>
         <td>{{ item.created_at }}</td>
-        <td class="actions">
-          {% if item.pdf_path %}
-            <a href="{{ url_for('preview_file', path=item.pdf_path) }}" target="_blank">预览 PDF</a>
-          {% endif %}
-        </td>
+        <td>{{ "PDF 已保存" if item.pdf_path else "无 PDF" }}</td>
       </tr>
       {% else %}
         {% if not standard_sets %}
@@ -109,4 +103,16 @@
     </tbody>
   </table>
 </section>
+
+<script>
+  // 切换同一个 iframe 的 PDF 来源，并让下载按钮始终跟随当前选中的文件。
+  document.querySelectorAll(".tab-button").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll(".tab-button").forEach((item) => item.classList.remove("active"));
+      button.classList.add("active");
+      document.getElementById("pdfPreview").src = button.dataset.previewUrl;
+      document.getElementById("currentDownload").href = button.dataset.downloadUrl;
+    });
+  });
+</script>
 {% endblock %}

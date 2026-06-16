@@ -165,7 +165,7 @@ def headquarters():
         exam_dir = STORAGE_DIR / "exams" / exam_id
         paper_path = save_upload(paper, exam_dir / "paper.pdf")
         standard_path = save_upload(standard, exam_dir / "standard_answer.pdf")
-        standard_json_path = exam_dir / "standard_answers.json"
+        standard_json_path = exam_dir / "results" / "standard" / "standard_answers.json"
         standard_answers = parse_standard_pdf(str(standard_path))
         save_to_json(standard_answers, str(standard_json_path))
 
@@ -295,6 +295,7 @@ def branch_exam(campus_id, exam_id):
 
     if request.method == "POST":
         action = request.form.get("action")
+        exam_dir = STORAGE_DIR / "exams" / exam_id
         delivery_dir = STORAGE_DIR / "exams" / exam_id / "campuses" / campus_id
 
         try:
@@ -306,7 +307,7 @@ def branch_exam(campus_id, exam_id):
                 set_id = uuid4().hex[:8]
                 pdf_path = save_upload(student_pdf, delivery_dir / f"student_answers_{set_id}.pdf")
                 students = recognize_pdf_answers(str(pdf_path))
-                json_path = delivery_dir / f"students_answers_{set_id}.json"
+                json_path = exam_dir / "results" / "students" / campus_id / f"students_answers_{set_id}.json"
                 save_to_json(students, str(json_path))
 
                 delivery["student_pdf_path"] = relative_path(pdf_path)
@@ -334,7 +335,7 @@ def branch_exam(campus_id, exam_id):
                 standard_answers = json.loads(absolute_path(standard_set["json_path"]).read_text(encoding="utf-8"))
                 students = json.loads(absolute_path(student_set["json_path"]).read_text(encoding="utf-8"))
                 reports = grade_students(standard_answers, students)
-                report_dir = delivery_dir / "reports" / f"{standard_set_id}_{student_set_id}"
+                report_dir = exam_dir / "results" / "reports" / campus_id / f"{standard_set_id}_{student_set_id}"
 
                 if report_dir.exists():
                     shutil.rmtree(report_dir)

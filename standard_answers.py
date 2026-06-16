@@ -6,9 +6,9 @@ from pathlib import Path
 import fitz  # PyMuPDF
 
 
-PDF_PATH = "题目/试卷/考试题目/政治/答案解析.pdf"
-OUTPUT_JSON = "standard_answers.json"
-OUTPUT_CSV = "standard_answers.csv"
+PDF_PATH = r"D:\desktop\高途面试\题目\试卷\考试题目\政治\【解析】26考研暑期营入营测试-政治.pdf"
+OUTPUT_JSON = "results/standard/standard_answers.json"
+OUTPUT_CSV = "results/standard/standard_answers.csv"
 
 
 def extract_text_from_pdf(pdf_path: str) -> str:

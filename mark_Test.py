@@ -4,18 +4,19 @@ import re
 from pathlib import Path
 
 
-STANDARD_ANSWER_PATH = "standard_answers.json"
-STUDENT_ANSWER_PATH = "students_answers.json"
-OUTPUT_DIR = "student_reports"
+STANDARD_ANSWER_PATH = "results/standard/standard_answers.json"
+STUDENT_ANSWER_PATH = "results/students/students_answers.json"
+OUTPUT_DIR = "results/reports"
 
 
 def load_json(path: str):
+    """读取 JSON 文件；输入文件路径，输出解析后的 Python 数据。"""
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def pick_value(data: dict, *keys, default=""):
-    """兼容新旧字段名；输入字典和候选键，输出第一个存在的值。"""
+    """从多个候选字段取值；输入字典和候选键，输出第一个存在的值。"""
     for key in keys:
         if key in data:
             return data.get(key)
@@ -25,7 +26,7 @@ def pick_value(data: dict, *keys, default=""):
 def normalize_answer(answer):
     """
     统一答案格式；输入任意答案文本，输出只包含 A-D 且排序后的答案。
-    这样 DBA 和 ABD 会被视为同一个多选答案。
+    这样 DBA 和 ABD 会被视为同一个多选答案，避免顺序差异影响批改。
     """
     if answer is None:
         return ""
@@ -40,26 +41,26 @@ def normalize_answer(answer):
 
 
 def build_standard_answer_map(standard_answers):
-    """把标准答案列表转为题号索引字典；输入标准答案列表，输出便于批改的映射。"""
+    """把标准答案列表转为题号索引；输入标准答案列表，输出题号到答案和解析的映射。"""
     answer_map = {}
 
     for item in standard_answers:
-        question_no = int(pick_value(item, "题号", "棰樺彿"))
+        question_no = int(pick_value(item, "题号"))
         answer_map[question_no] = {
-            "answer": normalize_answer(pick_value(item, "答案", "绛旀")),
-            "analysis": pick_value(item, "解析", "瑙ｆ瀽"),
+            "answer": normalize_answer(pick_value(item, "答案")),
+            "analysis": str(pick_value(item, "解析")).strip(),
         }
 
     return answer_map
 
 
 def build_student_answer_map(student_answers):
-    """把学生 answers 列表转为题号索引字典；输入作答列表，输出题号到答案的映射。"""
+    """把学生 answers 列表转为题号索引；输入作答列表，输出题号到答案的映射。"""
     answer_map = {}
 
     for item in student_answers:
-        question_no = int(pick_value(item, "题号", "棰樺彿"))
-        answer_map[question_no] = normalize_answer(pick_value(item, "答案", "绛旀"))
+        question_no = int(pick_value(item, "题号"))
+        answer_map[question_no] = normalize_answer(pick_value(item, "答案"))
 
     return answer_map
 
