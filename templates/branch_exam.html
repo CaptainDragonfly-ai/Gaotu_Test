@@ -31,13 +31,23 @@
 </section>
 
 <section class="grid two">
-  <form class="panel" method="post" enctype="multipart/form-data">
+  <form class="panel" method="post" enctype="multipart/form-data" id="studentUploadForm" data-job-url="{{ url_for('create_recognition_job', campus_id=campus.id, exam_id=exam.id) }}">
     <h2>上传学生答题卡</h2>
     <input type="hidden" name="action" value="upload_students">
     <label>学生答题卡 PDF
       <input type="file" name="student_pdf" accept="application/pdf" required>
     </label>
     <button type="submit">识别为学生答案</button>
+    <div class="progress-box hidden" id="recognitionProgress" data-status-url-template="{{ url_for('get_recognition_job_status', campus_id=campus.id, exam_id=exam.id, task_id='__TASK_ID__') }}">
+      <div class="progress-head">
+        <span id="recognitionMessage">等待上传</span>
+        <strong id="recognitionPercent">0%</strong>
+      </div>
+      <div class="progress-track">
+        <div class="progress-bar" id="recognitionBar"></div>
+      </div>
+      <p class="hint" id="recognitionDetail">识别过程中请不要关闭当前页面。</p>
+    </div>
   </form>
 
   <form class="panel" method="post">
@@ -104,6 +114,43 @@
   </table>
 </section>
 
+<section class="panel">
+  <h2>学生考试结果</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>姓名</th>
+        <th>手机号</th>
+        <th>科目</th>
+        <th>正确率</th>
+        <th>正确题数</th>
+        <th>错题数</th>
+        <th>空题数</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in report_items %}
+      {% set summary = item.report.summary %}
+      <tr>
+        <td>{{ item.report.name or "未知" }}</td>
+        <td>{{ item.report.phone or "未知" }}</td>
+        <td>{{ item.report.subject or exam.subject }}</td>
+        <td>{{ (summary["正确率"] * 100) | round(1) }}%</td>
+        <td>{{ summary["正确题数"] }}</td>
+        <td>{{ summary["错误题数"] }}</td>
+        <td>{{ summary["空题数"] }}</td>
+        <td class="actions">
+          <a href="{{ url_for('student_report', path=item.report_path) }}">查看详情</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="empty">批改完成后，这里会显示本场考试的学生成绩。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
 <script>
   // 切换同一个 iframe 的 PDF 来源，并让下载按钮始终跟随当前选中的文件。
   document.querySelectorAll(".tab-button").forEach((button) => {
@@ -114,5 +161,97 @@
       document.getElementById("currentDownload").href = button.dataset.downloadUrl;
     });
   });
+
+  const uploadForm = document.getElementById("studentUploadForm");
+  const progressBox = document.getElementById("recognitionProgress");
+  const progressMessage = document.getElementById("recognitionMessage");
+  const progressPercent = document.getElementById("recognitionPercent");
+  const progressBar = document.getElementById("recognitionBar");
+  const progressDetail = document.getElementById("recognitionDetail");
+  const progressStorageKey = `recognition-job:${window.location.pathname}`;
+
+  function setRecognitionProgress(percent, message, detail = "") {
+    const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
+    progressBox.classList.remove("hidden");
+    progressMessage.textContent = message || "正在处理";
+    progressPercent.textContent = `${safePercent}%`;
+    progressBar.style.width = `${safePercent}%`;
+    progressDetail.textContent = detail || "识别过程中请不要关闭当前页面。";
+  }
+
+  function setUploadDisabled(disabled) {
+    uploadForm.querySelectorAll("input, button").forEach((element) => {
+      element.disabled = disabled;
+    });
+  }
+
+  async function pollRecognitionJob(taskId) {
+    const statusUrl = progressBox.dataset.statusUrlTemplate.replace("__TASK_ID__", taskId);
+    const response = await fetch(statusUrl);
+    const payload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(payload.error || "识别任务查询失败。");
+    }
+
+    const detail = payload.total ? `已完成 ${payload.current} / ${payload.total} 页` : "正在准备识别任务。";
+    setRecognitionProgress(payload.percent, payload.message, detail);
+
+    if (payload.status === "done") {
+      sessionStorage.removeItem(progressStorageKey);
+      progressBox.classList.add("success");
+      setRecognitionProgress(100, payload.message, "页面即将刷新并显示新的学生答案。");
+      window.setTimeout(() => window.location.reload(), 800);
+      return;
+    }
+
+    if (payload.status === "error") {
+      sessionStorage.removeItem(progressStorageKey);
+      progressBox.classList.add("error");
+      setUploadDisabled(false);
+      setRecognitionProgress(payload.percent, payload.message, payload.error || "请检查 PDF 或稍后重试。");
+      return;
+    }
+
+    window.setTimeout(() => pollRecognitionJob(taskId).catch(showRecognitionError), 1000);
+  }
+
+  function showRecognitionError(error) {
+    sessionStorage.removeItem(progressStorageKey);
+    progressBox.classList.add("error");
+    setUploadDisabled(false);
+    setRecognitionProgress(0, "识别任务失败", error.message || "请稍后重试。");
+  }
+
+  uploadForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    setUploadDisabled(true);
+    progressBox.classList.remove("error", "success");
+    setRecognitionProgress(0, "正在上传答题卡 PDF", "上传完成后会自动开始识别。");
+
+    try {
+      const response = await fetch(uploadForm.dataset.jobUrl, {
+        method: "POST",
+        body: new FormData(uploadForm),
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || "上传失败。");
+      }
+
+      sessionStorage.setItem(progressStorageKey, payload.task_id);
+      pollRecognitionJob(payload.task_id).catch(showRecognitionError);
+    } catch (error) {
+      showRecognitionError(error);
+    }
+  });
+
+  const existingTaskId = sessionStorage.getItem(progressStorageKey);
+  if (existingTaskId) {
+    setUploadDisabled(true);
+    setRecognitionProgress(0, "正在恢复识别进度", "正在重新连接后台任务。");
+    pollRecognitionJob(existingTaskId).catch(showRecognitionError);
+  }
 </script>
 {% endblock %}

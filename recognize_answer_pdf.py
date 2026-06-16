@@ -22,8 +22,33 @@ API_CALL_RETRIES = 3
 
 QUESTION_KEY = "题号"
 ANSWER_KEY = "答案"
-QUESTION_KEYS = (QUESTION_KEY, "question_no", "question", "no")
-ANSWER_KEYS = (ANSWER_KEY, "answer")
+QUESTION_KEYS = (
+    QUESTION_KEY,
+    "题目",
+    "题目号",
+    "序号",
+    "编号",
+    "question_no",
+    "question_number",
+    "question",
+    "no",
+    "number",
+    "id",
+)
+ANSWER_KEYS = (
+    ANSWER_KEY,
+    "作答",
+    "学生答案",
+    "选择",
+    "选项",
+    "answer",
+    "student_answer",
+    "selected_answer",
+    "choice",
+    "selected",
+)
+PAYLOAD_WRAPPER_KEYS = ("data", "result", "student", "student_answer", "record", "page_result")
+PAYLOAD_LIST_KEYS = ("students", "student_answers", "pages", "records", "results", "items")
 
 IMAGE_PROFILES = [
     {"name": "standard", "dpi": 300, "contrast": 1.8, "sharpness": 1.4},
@@ -64,25 +89,44 @@ def get_client():
     )
 
 
+def _json_text_candidates(content: str):
+    """提取可能的 JSON 片段；输入模型原文，输出候选文本列表。"""
+    stripped = content.strip()
+    candidates = [stripped]
+
+    # 模型可能在代码块外补充说明，因此不能只匹配整段文本。
+    for match in re.finditer(r"```(?:json)?\s*(.*?)\s*```", stripped, flags=re.DOTALL | re.IGNORECASE):
+        candidates.append(match.group(1).strip())
+
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(stripped):
+        if char not in "[{":
+            continue
+
+        try:
+            _, end = decoder.raw_decode(stripped[index:])
+        except json.JSONDecodeError:
+            continue
+
+        candidates.append(stripped[index : index + end].strip())
+
+    unique_candidates = []
+    seen = set()
+    for candidate in candidates:
+        if candidate and candidate not in seen:
+            unique_candidates.append(candidate)
+            seen.add(candidate)
+
+    return unique_candidates
+
+
 def parse_model_json(content: str):
-    """解析模型返回的 JSON；输入模型文本，输出字典，兼容 Markdown 代码块。"""
+    """解析模型返回的 JSON；输入模型文本，输出 JSON 数据，兼容代码块和说明文字。"""
     if not content:
         raise ValueError("模型返回内容为空。")
 
-    candidates = [content.strip()]
-
-    # MiMo 有时会把 JSON 包在 ```json 代码块里，先剥掉外层再解析。
-    code_block = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", candidates[0], flags=re.DOTALL | re.IGNORECASE)
-    if code_block:
-        candidates.append(code_block.group(1).strip())
-
-    # 如果模型额外输出说明文字，尽量提取第一个 JSON 对象，避免误判整页失败。
-    json_object = re.search(r"\{.*\}", candidates[0], flags=re.DOTALL)
-    if json_object:
-        candidates.append(json_object.group(0).strip())
-
     last_error = None
-    for candidate in candidates:
+    for candidate in _json_text_candidates(content):
         try:
             return json.loads(candidate)
         except json.JSONDecodeError as exc:
@@ -108,6 +152,50 @@ def normalize_answer(answer):
     if len(cleaned) > 1:
         return "".join(sorted(set(cleaned)))
     return cleaned
+
+
+def has_question_and_answer(item: dict):
+    """判断字典是否像一道题的答案；输入字典，输出布尔值。"""
+    if not isinstance(item, dict):
+        return False
+
+    has_question = any(key in item for key in QUESTION_KEYS)
+    has_answer = any(key in item for key in ANSWER_KEYS)
+    return has_question and has_answer
+
+
+def unwrap_recognition_payload(result):
+    """拆掉模型常见外层包装；输入任意 JSON 数据，输出包含 answers 的学生答题对象。"""
+    if isinstance(result, list):
+        if all(has_question_and_answer(item) for item in result):
+            return {"answers": result}
+
+        # 单页答题卡通常只对应一个学生；如果返回学生数组，选择第一个含 answers 的对象。
+        for item in result:
+            try:
+                unwrapped = unwrap_recognition_payload(item)
+            except ValueError:
+                continue
+            if isinstance(unwrapped, dict) and isinstance(unwrapped.get("answers"), list):
+                return unwrapped
+
+        raise ValueError("模型返回数组中没有可用的学生答题数据。")
+
+    if not isinstance(result, dict):
+        raise ValueError("模型返回的顶层结构不是 JSON 对象或数组。")
+
+    if isinstance(result.get("answers"), list):
+        return result
+
+    for key in PAYLOAD_WRAPPER_KEYS:
+        if key in result:
+            return unwrap_recognition_payload(result[key])
+
+    for key in PAYLOAD_LIST_KEYS:
+        if key in result:
+            return unwrap_recognition_payload(result[key])
+
+    raise ValueError("模型返回结果缺少 answers 列表。")
 
 
 def enhance_png_bytes(image_bytes: bytes, contrast: float = 1.8, sharpness: float = 1.4):
@@ -205,12 +293,9 @@ def build_json_repair_prompt(raw_content: str, page_num: int):
 
 def validate_and_normalize_result(result: dict, page_num: int, min_answers: int = MIN_ACCEPTED_ANSWER_COUNT):
     """校验并整理识别结果；输入模型 JSON，输出批改流程可直接使用的数据。"""
-    if not isinstance(result, dict):
-        raise ValueError("模型返回的顶层结构不是 JSON 对象。")
+    result = unwrap_recognition_payload(result)
 
     answers = result.get("answers")
-    if not isinstance(answers, list):
-        raise ValueError("模型返回结果缺少 answers 列表。")
 
     normalized_answers = []
     seen_questions = set()
@@ -347,7 +432,7 @@ def recognize_page_with_retry(pdf_path: str, page_index: int, client):
     raise ValueError(f"第 {page_index + 1} 页识别失败：{last_error}")
 
 
-def recognize_pdf_answers(pdf_path: str, show_progress: bool = True):
+def recognize_pdf_answers(pdf_path: str, show_progress: bool = True, progress_callback=None):
     """识别整份学生答题卡 PDF；输入 PDF 路径，输出每页学生答题数据列表。"""
     client = get_client()
     doc = fitz.open(pdf_path)
@@ -360,6 +445,8 @@ def recognize_pdf_answers(pdf_path: str, show_progress: bool = True):
     results = []
     if show_progress:
         print_progress(0, page_count)
+    if progress_callback:
+        progress_callback(0, page_count)
 
     for page_index in range(page_count):
         try:
@@ -371,6 +458,8 @@ def recognize_pdf_answers(pdf_path: str, show_progress: bool = True):
 
         if show_progress:
             print_progress(page_index + 1, page_count)
+        if progress_callback:
+            progress_callback(page_index + 1, page_count)
 
     return results
 

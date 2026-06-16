@@ -1,13 +1,12 @@
 import json
 import os
 import shutil
+from threading import Lock, Thread
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from flask import Flask, flash, redirect, render_template, request, send_file, url_for
-from werkzeug.utils import secure_filename
-
+from flask import Flask, flash, jsonify, redirect, render_template, request, send_file, url_for
 from mark_Test import grade_students, save_reports
 from recognize_answer_pdf import recognize_pdf_answers
 from standard_answers import parse_standard_pdf, save_to_json
@@ -17,6 +16,8 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 STORAGE_DIR = BASE_DIR / "storage"
 DB_PATH = DATA_DIR / "app_data.json"
+RECOGNITION_JOBS = {}
+RECOGNITION_JOBS_LOCK = Lock()
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
@@ -74,8 +75,11 @@ def save_upload(file_storage, target_path: Path):
 
 
 def require_pdf(file_storage):
-    filename = secure_filename(file_storage.filename or "")
-    return filename.lower().endswith(".pdf")
+    """校验上传文件是否为 PDF；输入 Flask 文件对象，输出是否允许继续处理。"""
+    filename = (file_storage.filename or "").strip()
+
+    # 直接使用原始文件名判断后缀，避免中文文件名被 secure_filename 清理后丢失点号。
+    return bool(filename) and Path(filename).suffix.lower() == ".pdf"
 
 
 def relative_path(path: Path):
@@ -126,6 +130,106 @@ def ensure_delivery_sets(delivery, exam):
 
 def find_answer_set(answer_sets, set_id):
     return next((item for item in answer_sets if item["id"] == set_id), None)
+
+
+def update_recognition_job(task_id, **fields):
+    """更新识别任务状态；输入任务 ID 和字段，输出当前任务快照。"""
+    with RECOGNITION_JOBS_LOCK:
+        job = RECOGNITION_JOBS.setdefault(task_id, {})
+        job.update(fields)
+        return dict(job)
+
+
+def get_recognition_job(task_id):
+    """读取识别任务状态；输入任务 ID，输出任务快照或 None。"""
+    with RECOGNITION_JOBS_LOCK:
+        job = RECOGNITION_JOBS.get(task_id)
+        return dict(job) if job else None
+
+
+def save_student_answer_set(db, delivery, exam_id, campus_id, set_id, pdf_path, students):
+    """保存学生识别结果；输入识别数据，输出更新后的交付记录。"""
+    exam_dir = STORAGE_DIR / "exams" / exam_id
+    json_path = exam_dir / "results" / "students" / campus_id / f"students_answers_{set_id}.json"
+    save_to_json(students, str(json_path))
+
+    student_sets = delivery.setdefault("student_answer_sets", [])
+    delivery["student_pdf_path"] = relative_path(pdf_path)
+    delivery["student_json_path"] = relative_path(json_path)
+    student_sets.append(
+        {
+            "id": set_id,
+            "name": f"学生答案 {now_text()}",
+            "json_path": delivery["student_json_path"],
+            "pdf_path": delivery["student_pdf_path"],
+            "created_at": now_text(),
+        }
+    )
+    delivery["status"] = "已识别答题卡"
+    delivery["updated_at"] = now_text()
+    db["deliveries"][delivery_key(exam_id, campus_id)] = delivery
+    save_db(db)
+    return delivery
+
+
+def load_delivery_reports(delivery):
+    """读取某次交付的学生报告；输入交付记录，输出可供页面展示的报告列表。"""
+    report_dir_text = delivery.get("report_dir", "")
+    if not report_dir_text or not storage_file_exists(report_dir_text):
+        return []
+
+    report_items = []
+    for report_path in sorted(absolute_path(report_dir_text).glob("*.json")):
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+
+        # 报告文件由批改流程生成，这里补上相对路径，方便复用学生端成绩详情页。
+        report_items.append(
+            {
+                "report": report,
+                "report_path": relative_path(report_path),
+            }
+        )
+
+    return report_items
+
+
+def run_student_recognition_job(task_id, exam_id, campus_id, set_id, pdf_path):
+    """后台执行学生答题卡识别；输入任务和文件信息，输出写入任务状态。"""
+    def report_progress(current, total):
+        percent = round((current / total) * 100) if total else 0
+        update_recognition_job(
+            task_id,
+            current=current,
+            total=total,
+            percent=percent,
+            message=f"正在识别第 {min(current + 1, total)} / {total} 页" if current < total else "正在保存识别结果",
+        )
+
+    try:
+        update_recognition_job(task_id, status="running", message="正在读取 PDF 页数", percent=0)
+        students = recognize_pdf_answers(str(pdf_path), show_progress=False, progress_callback=report_progress)
+
+        db = load_db()
+        exam = find_exam(db, exam_id)
+        campus = find_campus(db, campus_id)
+        delivery = db["deliveries"].get(delivery_key(exam_id, campus_id))
+        if not exam or not campus or not delivery:
+            raise ValueError("未找到该分校的试卷记录。")
+
+        save_student_answer_set(db, delivery, exam_id, campus_id, set_id, pdf_path, students)
+        update_recognition_job(
+            task_id,
+            status="done",
+            current=len(students),
+            total=len(students),
+            percent=100,
+            message=f"识别完成，已生成 {len(students)} 份学生答案。",
+        )
+    except Exception as exc:
+        update_recognition_job(task_id, status="error", message=f"处理失败：{exc}", error=str(exc))
 
 
 @app.context_processor
@@ -307,21 +411,7 @@ def branch_exam(campus_id, exam_id):
                 set_id = uuid4().hex[:8]
                 pdf_path = save_upload(student_pdf, delivery_dir / f"student_answers_{set_id}.pdf")
                 students = recognize_pdf_answers(str(pdf_path))
-                json_path = exam_dir / "results" / "students" / campus_id / f"students_answers_{set_id}.json"
-                save_to_json(students, str(json_path))
-
-                delivery["student_pdf_path"] = relative_path(pdf_path)
-                delivery["student_json_path"] = relative_path(json_path)
-                student_sets.append(
-                    {
-                        "id": set_id,
-                        "name": f"学生答案 {now_text()}",
-                        "json_path": delivery["student_json_path"],
-                        "pdf_path": delivery["student_pdf_path"],
-                        "created_at": now_text(),
-                    }
-                )
-                delivery["status"] = "已识别答题卡"
+                save_student_answer_set(db, delivery, exam_id, campus_id, set_id, pdf_path, students)
 
             elif action == "grade":
                 standard_set_id = request.form.get("standard_set_id", "")
@@ -350,9 +440,10 @@ def branch_exam(campus_id, exam_id):
             else:
                 raise ValueError("未知操作。")
 
-            delivery["updated_at"] = now_text()
-            db["deliveries"][key] = delivery
-            save_db(db)
+            if action != "upload_students":
+                delivery["updated_at"] = now_text()
+                db["deliveries"][key] = delivery
+                save_db(db)
             flash("操作完成。", "success")
 
         except Exception as exc:
@@ -367,7 +458,57 @@ def branch_exam(campus_id, exam_id):
         delivery=delivery,
         standard_sets=standard_sets,
         student_sets=student_sets,
+        report_items=load_delivery_reports(delivery),
     )
+
+
+@app.route("/branch/<campus_id>/exam/<exam_id>/recognition-jobs", methods=["POST"])
+def create_recognition_job(campus_id, exam_id):
+    db = load_db()
+    exam = find_exam(db, exam_id)
+    campus = find_campus(db, campus_id)
+    delivery = db["deliveries"].get(delivery_key(exam_id, campus_id))
+
+    if not exam or not campus or not delivery:
+        return jsonify({"error": "未找到该分校的试卷记录。"}), 404
+
+    student_pdf = request.files.get("student_pdf")
+    if not student_pdf or not require_pdf(student_pdf):
+        return jsonify({"error": "请选择后缀为 .pdf 的学生答题卡文件，中文文件名也支持。"}), 400
+
+    task_id = uuid4().hex
+    set_id = uuid4().hex[:8]
+    delivery_dir = STORAGE_DIR / "exams" / exam_id / "campuses" / campus_id
+    pdf_path = save_upload(student_pdf, delivery_dir / f"student_answers_{set_id}.pdf")
+
+    update_recognition_job(
+        task_id,
+        status="queued",
+        exam_id=exam_id,
+        campus_id=campus_id,
+        set_id=set_id,
+        current=0,
+        total=0,
+        percent=0,
+        message="已上传，等待开始识别",
+    )
+    worker = Thread(
+        target=run_student_recognition_job,
+        args=(task_id, exam_id, campus_id, set_id, pdf_path),
+        daemon=True,
+    )
+    worker.start()
+
+    return jsonify({"task_id": task_id})
+
+
+@app.route("/branch/<campus_id>/exam/<exam_id>/recognition-jobs/<task_id>", methods=["GET"])
+def get_recognition_job_status(campus_id, exam_id, task_id):
+    job = get_recognition_job(task_id)
+    if not job or job.get("exam_id") != exam_id or job.get("campus_id") != campus_id:
+        return jsonify({"error": "未找到识别任务。"}), 404
+
+    return jsonify(job)
 
 
 @app.route("/student", methods=["GET", "POST"])
